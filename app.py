@@ -13,13 +13,13 @@ def fetch_nesco_balance(meter_number):
     NESCO কাস্টমার পোর্টালের আসল URL এবং Payload বের করে এখানে বসাতে হবে।
     """
     
-    # এটি একটি ডামি/টেম্পলেট স্ট্রাকচার। আসল URL এবং হেডারের জন্য NESCO ওয়েবসাইট চেক করুন।
+    # এটি একটি ডামি/টেম্পলেট স্ট্রাকচার। আসল URL এবং হেডারের জন্য NESCO ওয়েবসাইট চেক করুন।
     nesco_login_url = "https://customer.nesco.gov.bd/api/login_or_balance_endpoint"
     
-    # ধরি NESCO এই ফরম্যাটে ডেটা নেয়
+    # ধরি NESCO এই ফরম্যাটে ডেটা নেয়
     payload = {
         "meter_no": meter_number
-        # যদি লগইন প্রয়োজন হয়, তবে username/password বা token এখানে দিতে হবে
+        # যদি লগইন প্রয়োজন হয়, তবে username/password বা token এখানে দিতে হবে
     }
     
     headers = {
@@ -46,6 +46,15 @@ def fetch_nesco_balance(meter_number):
             "success": False,
             "error": str(e)
         }
+
+# --- নতুন যোগ করা হোম রুট ---
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({
+        "status": "success",
+        "message": "NESCO API is running perfectly!"
+    })
+# -----------------------------
 
 @app.route('/api/get-balance', methods=['GET'])
 def get_balance():
