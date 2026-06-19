@@ -1,27 +1,21 @@
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from playwright.sync_api import sync_playwright
-import os
 import re
 
 app = FastAPI(title="NESCO Live Scraper API")
 
-# গ্লোবাল CORS কনফিগারেশন
+# ব্রাউজারের CORS ব্লকিং পুরোপুরি দূর করার পারফেক্ট সেটিংস
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["*"],          # সব ডোমেইন থেকে রিকোয়েস্ট অ্যালাউ করবে
+    allow_credentials=False,      # credentials False করায় স্টার (*) পলিসি ১০০% কাজ করবে
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 @app.get("/api/balance/{meter_no}")
-def get_nesco_balance(meter_no: str, response: Response):
-    # ব্রাউজার ব্লকিং এড়াতে সরাসরি রেসপন্সে হেডার পিন করা হলো
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-
+def get_nesco_balance(meter_no: str):
     if not meter_no.isdigit():
         raise HTTPException(status_code=400, detail="Invalid meter number format")
 
