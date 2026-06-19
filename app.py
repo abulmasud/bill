@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import requests
 from bs4 import BeautifulSoup
+import re
 
 app = Flask(__name__)
 CORS(app) 
@@ -9,24 +10,23 @@ CORS(app)
 def fetch_nesco_balance(meter_number):
     url = "https://customer.nesco.gov.bd/pre/panel"
     
-    # requests.Session() ব্যবহার করা হচ্ছে যাতে কুকিজ এবং টোকেন সেভ থাকে
     session = requests.Session()
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
     }
 
     try:
-        # ধাপ ১: পেজে ভিজিট করে _token (CSRF Token) বের করা
+        # ধাপ ১: পেজে ভিজিট করে _token বের করা
         response = session.get(url, headers=headers)
         soup = BeautifulSoup(response.text, 'html.parser')
         
         token_input = soup.find('input', {'name': '_token'})
         if not token_input:
-            return {"success": False, "error": "Security token missing on website!"}
+            return {"success": False, "error": "Security token missing!"}
         token = token_input['value']
 
-        # ইনপুট ফিল্ডের নাম বের করা (মিটার নম্বর যেখানে বসবে)
-        input_name = "customer_no" # ডিফল্ট নাম
+        # ইনপুট ফিল্ডের নাম বের করা
+        input_name = "customer_no" 
         form = soup.find('form', id='customer-form')
         if form:
             for inp in form.find_all('input'):
@@ -38,38 +38,51 @@ def fetch_nesco_balance(meter_number):
         payload = {
             '_token': token,
             input_name: meter_number,
-            'submit': 'রিচার্জ হিস্ট্রি' # বাটনের ভ্যালু
+            'submit': 'রিচার্জ হিস্ট্রি' 
         }
 
         post_resp = session.post(url, data=payload, headers=headers)
         res_soup = BeautifulSoup(post_resp.text, 'html.parser')
 
-        # ধাপ ৩: রেজাল্ট পেজ থেকে ডেটা টেবিল বের করা
-        table = res_soup.find('table')
-        if not table:
-            return {"success": False, "error": "এই মিটারের কোনো ডেটা পাওয়া যায়নি অথবা নম্বরটি ভুল।"}
-
-        # টেবিলের প্রথম ডেটা সারিটি (Latest Recharge) বের করা
-        rows = table.find('tbody').find_all('tr') if table.find('tbody') else table.find_all('tr')[1:]
+        # ধাপ ৩: "অবশিষ্ট ব্যালেন্স" খুঁজে বের করা (ম্যাজিক ট্রিক)
+        remaining_balance = None
         
-        if not rows:
-             return {"success": False, "error": "রিচার্জের কোনো রেকর্ড নেই।"}
+        # 'অবশিষ্ট ব্যালেন্স' লেখাটি পেজের যেখানে আছে সেটি খুঁজবে
+        balance_text_element = res_soup.find(string=re.compile("অবশিষ্ট ব্যালেন্স"))
+        
+        if balance_text_element:
+            # লেখাটির মূল কন্টেইনার (div) ধরবে
+            container = balance_text_element.find_parent(['div', 'div', 'tr'])
+            if container:
+                # কন্টেইনারের ভেতর কোনো input বক্সে ডেটা আছে কি না খুঁজবে
+                inputs = container.find_all('input')
+                for inp in inputs:
+                    val = inp.get('value', '').strip()
+                    if val and re.match(r'^[0-9\.]+$', val):
+                        remaining_balance = val
+                        break
+                
+                # যদি input বক্সে না থাকে, তবে সাধারণ টেক্সট থেকে নাম্বারটি খুঁজবে
+                if not remaining_balance:
+                    texts = container.stripped_strings
+                    for t in texts:
+                        # শুধু নাম্বার এবং দশমিক আছে এমন টেক্সট (যেমন: 189.33)
+                        if re.match(r'^[0-9\.]+$', t):
+                            remaining_balance = t
+                            break
 
-        first_row_cols = rows[0].find_all('td')
-        row_data = [td.text.strip() for td in first_row_cols]
-
-        # NESCO এর টেবিলে সাধারণত: [০] তারিখ, [১] ভেন্ডর, [২] রসিদ নম্বর, [৩] টাকার পরিমাণ থাকে।
-        # আমরা পুরো সারিটাই পাঠিয়ে দিচ্ছি, যাতে কোনো ভুল না হয়।
-        latest_recharge_amount = row_data[3] if len(row_data) > 3 else row_data[-1]
-        recharge_date = row_data[0] if len(row_data) > 0 else "Unknown Date"
-
-        return {
-            "success": True,
-            "meter_number": meter_number,
-            "balance": f"৳ {latest_recharge_amount}",
-            "details": f"সর্বশেষ রিচার্জের তারিখ: {recharge_date}",
-            "raw_data": row_data # ডিবাগ করার সুবিধার জন্য
-        }
+        if remaining_balance:
+            return {
+                "success": True,
+                "meter_number": meter_number,
+                "balance": f"{remaining_balance}", # একদম আসল ব্যালেন্স
+                "details": "লাইভ অবশিষ্ট ব্যালেন্স সফলভাবে আনা হয়েছে!"
+            }
+        else:
+            return {
+                "success": False,
+                "error": "আপনার মিটার নম্বরের জন্য কোনো অবশিষ্ট ব্যালেন্স পাওয়া যায়নি।"
+            }
 
     except Exception as e:
         return {
@@ -79,7 +92,7 @@ def fetch_nesco_balance(meter_number):
 
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({"status": "success", "message": "NESCO Live Scraper API is running!"})
+    return jsonify({"status": "success", "message": "NESCO Real Balance API is running!"})
 
 @app.route('/api/get-balance', methods=['GET'])
 def get_balance():
